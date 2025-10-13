@@ -1,0 +1,29 @@
+{
+  "nodes": [
+    {"id": "Raffles", "lat": 1.2965, "lon": 103.8530},
+    {"id": "Clarke", "lat": 1.2905, "lon": 103.8463},
+    {"id": "Marina", "lat": 1.2835, "lon": 103.8600},
+    {"id": "Bugis", "lat": 1.3000, "lon": 103.8560},
+    {"id": "Esplanade", "lat": 1.2890, "lon": 103.8555},
+    {"id": "Chinatown", "lat": 1.2845, "lon": 103.8430}
+  ],
+  "edges": [
+    {"from": "Raffles", "to": "Clarke", "distance_m": 750, "turn_penalty_s": 5, "safe_score": 1.1},
+    {"from": "Clarke", "to": "Raffles", "distance_m": 750, "turn_penalty_s": 5, "safe_score": 1.1},
+    {"from": "Clarke", "to": "Chinatown", "distance_m": 500, "turn_penalty_s": 4, "safe_score": 0.8},
+    {"from": "Chinatown", "to": "Clarke", "distance_m": 500, "turn_penalty_s": 4, "safe_score": 0.8},
+    {"from": "Chinatown", "to": "Marina", "distance_m": 1200, "turn_penalty_s": 8, "safe_score": 0.6},
+    {"from": "Marina", "to": "Chinatown", "distance_m": 1200, "turn_penalty_s": 8, "safe_score": 0.6},
+    {"from": "Raffles", "to": "Bugis", "distance_m": 650, "turn_penalty_s": 6, "safe_score": 1.0},
+    {"from": "Bugis", "to": "Raffles", "distance_m": 650, "turn_penalty_s": 6, "safe_score": 1.0},
+    {"from": "Bugis", "to": "Marina", "distance_m": 800, "turn_penalty_s": 5, "safe_score": 1.2},
+    {"from": "Marina", "to": "Bugis", "distance_m": 800, "turn_penalty_s": 5, "safe_score": 1.2},
+    {"from": "Marina", "to": "Esplanade", "distance_m": 300, "turn_penalty_s": 2, "safe_score": 1.4},
+    {"from": "Esplanade", "to": "Marina", "distance_m": 300, "turn_penalty_s": 2, "safe_score": 1.4},
+    {"from": "Esplanade", "to": "Raffles", "distance_m": 400, "turn_penalty_s": 3, "safe_score": 1.3},
+    {"from": "Raffles", "to": "Esplanade", "distance_m": 400, "turn_penalty_s": 3, "safe_score": 1.3},
+    {"from": "Clarke", "to": "Esplanade", "distance_m": 700, "turn_penalty_s": 6, "safe_score": 0.9},
+    {"from": "Esplanade", "to": "Clarke", "distance_m": 700, "turn_penalty_s": 6, "safe_score": 0.9},
+    {"from": "Bugis", "to": "Chinatown", "distance_m": 900, "turn_penalty_s": 7, "safe_score": 0.5}
+  ]
+}

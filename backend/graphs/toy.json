@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {"id": "A", "lat": 1.2960, "lon": 103.8450},
+    {"id": "B", "lat": 1.2960, "lon": 103.8480},
+    {"id": "C", "lat": 1.2990, "lon": 103.8485},
+    {"id": "D", "lat": 1.2995, "lon": 103.8455}
+  ],
+  "edges": [
+    {"from": "A", "to": "B", "distance_m": 260, "turn_penalty_s": 3, "safe_score": 1.0},
+    {"from": "B", "to": "C", "distance_m": 220, "turn_penalty_s": 6, "safe_score": 0.7},
+    {"from": "C", "to": "D", "distance_m": 250, "turn_penalty_s": 2, "safe_score": 1.3},
+    {"from": "D", "to": "A", "distance_m": 210, "turn_penalty_s": 4, "safe_score": 1.1},
+    {"from": "B", "to": "A", "distance_m": 260, "turn_penalty_s": 3, "safe_score": 1.0},
+    {"from": "C", "to": "B", "distance_m": 220, "turn_penalty_s": 6, "safe_score": 0.7},
+    {"from": "D", "to": "C", "distance_m": 250, "turn_penalty_s": 2, "safe_score": 1.3},
+    {"from": "A", "to": "D", "distance_m": 210, "turn_penalty_s": 4, "safe_score": 1.1},
+    {"from": "A", "to": "C", "distance_m": 450, "turn_penalty_s": 8, "safe_score": 0.9},
+    {"from": "C", "to": "A", "distance_m": 450, "turn_penalty_s": 8, "safe_score": 0.9}
+  ]
+}
