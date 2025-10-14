@@ -10,8 +10,9 @@ from ...schemas import (
     PaymentCaptureRequest,
     PaymentOut,
     PaymentRefundRequest,
+    PaymentRefundRequestBody,
 )
-from ...models import Payment, PaymentStatus, Ride, Bike, User
+from ...models import Payment, PaymentStatus, Ride, Bike, User, RoleEnum
 
 from ...services.idempotency import IdempotencyService
 from ...services.payments import PaymentService
@@ -26,7 +27,11 @@ def _serialize_payment(payment) -> dict:
         amount_cents=payment.amount_cents,
         status=payment.status.value,
         idempotency_key=payment.idempotency_key,
+        captured_at=payment.captured_at.isoformat() if payment.captured_at else None,
+        refunded_at=payment.refunded_at.isoformat() if payment.refunded_at else None,
+        refund_reason=payment.refund_reason,
     ).model_dump()
+
 
 
 @router.post("/authorize", response_model=PaymentOut)
@@ -71,6 +76,32 @@ def capture(
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload_dict)
 
 
+@router.post("/{payment_id}/refund-request", response_model=PaymentOut)
+def request_refund(
+    payment_id: int,
+    payload: PaymentRefundRequestBody,
+    *,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    service = PaymentService(db)
+    idem = IdempotencyService(
+        db,
+        endpoint=f"/payments/{payment_id}/refund-request",
+        key=idempotency_key,
+        request_payload={"payment_id": payment_id, **payload.model_dump()},
+    )
+    result = service.request_refund(payment_id=payment_id, requester=user, reason=payload.reason, idempotency=idem)
+    if result.idempotent_record:
+        return JSONResponse(status_code=result.idempotent_record.response_status, content=result.idempotent_record.response_json)
+    if not result.payment:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Refund request failed")
+    payload_dict = _serialize_payment(result.payment)
+    idem.store_response(status.HTTP_200_OK, payload_dict)
+    db.commit()
+    return JSONResponse(status_code=status.HTTP_200_OK, content=payload_dict)
+
 @router.post("/refund", response_model=PaymentOut)
 def refund(
     payload: PaymentRefundRequest,
@@ -92,6 +123,22 @@ def refund(
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload_dict)
 
 
+
+@router.get("/{payment_id:int}", response_model=PaymentOut)
+def payment_detail(
+    payment_id: int,
+    *,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user),
+):
+    payment = db.get(Payment, payment_id)
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    ride = payment.ride
+    if user.role != RoleEnum.admin:
+        if ride is None or ride.user_id != user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    return _serialize_payment(payment)
 
 @router.get("/summary")
 def payment_summary(*, db: Session = Depends(get_db), _admin=Depends(deps.get_current_admin)):
@@ -124,6 +171,8 @@ def payment_records(*, db: Session = Depends(get_db), _admin=Depends(deps.get_cu
                 "ride_ended_at": ride.ended_at.isoformat() if ride.ended_at else None,
                 "authorized_at": payment.created_at.isoformat() if payment.created_at else None,
                 "captured_at": payment.captured_at.isoformat() if payment.captured_at else None,
+                "refunded_at": payment.refunded_at.isoformat() if payment.refunded_at else None,
+                "refund_reason": payment.refund_reason,
                 "meters": ride.meters,
                 "seconds": ride.seconds,
             }

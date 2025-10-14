@@ -27,6 +27,7 @@ from ..security import hash_password
 from ..services.eventlog import log_event
 from ..services.idempotency import IdempotencyService, IdempotencyRecord, IdempotencyConflict
 from ..services.routing import RoutingService
+from ..services.pricing import PricingService
 from ..utils import haversine_m, calories_kcal
 
 
@@ -57,6 +58,7 @@ class RideService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.routing = RoutingService(graph_name=settings.default_graph_name)
+        self.pricing = PricingService(db)
 
     def _get_active_pricing_plan(self) -> PricingPlan:
         plan = (
@@ -130,6 +132,8 @@ class RideService:
 
         pricing_plan = self._get_active_pricing_plan()
 
+        snapshot = self.pricing.compute_snapshot()
+
         ride = Ride(
             user_id=ride_user.id if ride_user else None,
             bike_id=bike.id,
@@ -138,6 +142,7 @@ class RideService:
             polyline_geojson={"type": "LineString", "coordinates": []},
             pricing_version=pricing_plan.version,
             unlock_token=secrets.token_urlsafe(18),
+            dynamic_multiplier_start=snapshot.multiplier,
         )
         bike.lock_state = BikeLockState.in_use
         bike.last_reported_at = datetime.utcnow()
@@ -234,12 +239,14 @@ class RideService:
 
         return TelemetryResult(ride=ride, bike=bike)
 
-    def _compute_fare(self, ride: Ride, plan: PricingPlan) -> int:
+    def _compute_fare(self, ride: Ride, plan: PricingPlan, dynamic_multiplier: float | None = None) -> int:
         minutes = ride.seconds / 60.0
         km = ride.meters / 1000.0
         raw_fare = (
             plan.base_cents + plan.per_min_cents * minutes + plan.per_km_cents * km
         ) * plan.surge_multiplier
+        if dynamic_multiplier is not None:
+            raw_fare *= dynamic_multiplier
         if settings.pricing_rounding == "bankers":
             cents = int(round(raw_fare))
         else:
@@ -319,6 +326,8 @@ class RideService:
                 },
             )
 
+        snapshot = self.pricing.compute_snapshot()
+
         plan = self._get_active_pricing_plan()
         if ride.pricing_version != plan.version:
             plan = (
@@ -329,7 +338,8 @@ class RideService:
 
         ride.state = RideState.ended
         ride.ended_at = datetime.utcnow()
-        ride.fare_cents = self._compute_fare(ride, plan)
+        ride.dynamic_multiplier_end = snapshot.multiplier
+        ride.fare_cents = self._compute_fare(ride, plan, snapshot.multiplier)
         bike.lock_state = BikeLockState.locked
         bike.lat = lat
         bike.lon = lon
@@ -360,14 +370,22 @@ class RideService:
 
     def _get_or_create_simulated_user(self, email: str) -> User:
         user = self.db.query(User).filter(User.email == email).first()
+        default_password = "ride123"
         if user:
+            user.password_hash = hash_password(default_password)
+            self.db.add(user)
+            self.db.flush()
             return user
         user = User(
             email=email,
-            password_hash=hash_password(secrets.token_urlsafe(12)),
+            password_hash=hash_password(default_password),
             role=RoleEnum.user,
             weight_kg=70.0,
         )
         self.db.add(user)
         self.db.flush()
         return user
+
+
+
+

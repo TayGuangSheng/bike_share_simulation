@@ -51,6 +51,8 @@ def _serialize_ride(ride: Ride) -> RideOut:
         unlock_token=ride.unlock_token,
         polyline_geojson=ride.polyline_geojson or {"type": "LineString", "coordinates": []},
         metrics=metrics,
+        dynamic_multiplier_start=ride.dynamic_multiplier_start,
+        dynamic_multiplier_end=ride.dynamic_multiplier_end,
     )
 
 
@@ -142,3 +144,4 @@ def lock_bike(
     idem.store_response(status.HTTP_200_OK, response_dict)
     db.commit()
     return JSONResponse(status_code=status.HTTP_200_OK, content=response_dict)
+

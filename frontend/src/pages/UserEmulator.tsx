@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiGet, apiPost } from "../store/api"
+import MultiplierBadge from "../components/MultiplierBadge"
 import { useEmulatorStore, EmulatorSession } from "../store/emulator"
 
 const SIM_DOMAIN = "sim.bikeshare.local"
+const SIM_USER_PASSWORD = "ride123"
 type Session = EmulatorSession
 const SG_BOUNDS = {
   minLat: 1.23,
@@ -30,6 +32,23 @@ function createKey(prefix: string) {
 
 const formatCurrency = (cents: number) => `SGD ${(cents / 100).toFixed(2)}`
 
+async function loginSimUser(email: string): Promise<string | null> {
+  try {
+    const res = await fetch("http://localhost:8000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: SIM_USER_PASSWORD }),
+    })
+    if (!res.ok) {
+      return null
+    }
+    const data = await res.json()
+    return typeof data?.access_token === "string" ? data.access_token : null
+  } catch {
+    return null
+  }
+}
+
 export default function UserEmulator() {
   const [bikes, setBikes] = useState<any[]>([])
   const sessions = useEmulatorStore((s) => s.sessions)
@@ -39,6 +58,7 @@ export default function UserEmulator() {
   const sessionsRef = useRef<Session[]>([])
   const loadedRef = useRef(false)
   const timersRef = useRef<Record<string, number>>({})
+  const paymentTimersRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
     sessionsRef.current = sessions
@@ -48,6 +68,8 @@ export default function UserEmulator() {
     return () => {
       Object.values(timersRef.current).forEach((timer) => window.clearInterval(timer))
       timersRef.current = {}
+      Object.values(paymentTimersRef.current).forEach((timer) => window.clearInterval(timer))
+      paymentTimersRef.current = {}
     }
   }, [])
 
@@ -60,6 +82,97 @@ export default function UserEmulator() {
       prev.map((session) => (session.id === sessionId ? { ...session, ...updates } : session))
     )
   }, [])
+
+  const stopPaymentPolling = useCallback((sessionId: string) => {
+    const timer = paymentTimersRef.current[sessionId]
+    if (timer) {
+      window.clearInterval(timer)
+      delete paymentTimersRef.current[sessionId]
+    }
+  }, [])
+
+  const startPaymentPolling = useCallback((sessionId: string, paymentId: number) => {
+    const poll = async () => {
+      const session = sessionsRef.current.find((s) => s.id === sessionId)
+      if (!session || !session.payment) {
+        stopPaymentPolling(sessionId)
+        return
+      }
+      let token = session.userToken
+      if (!token) {
+        token = await loginSimUser(session.simEmail)
+        if (token) {
+          updateSession(sessionId, { userToken: token })
+        }
+      }
+      if (!token) {
+        stopPaymentPolling(sessionId)
+        updateSession(sessionId, {
+          status: "refund request failed (login)",
+          payment: { ...session.payment, message: "could not authenticate for refund" },
+        })
+        return
+      }
+      try {
+        const res = await fetch(`http://localhost:8000/api/v1/payments/${paymentId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        })
+        if (!res.ok) {
+          if (res.status === 404) {
+            stopPaymentPolling(sessionId)
+            updateSession(sessionId, {
+              payment: { ...session.payment, message: "payment not found" },
+            })
+          } else if (res.status === 401 || res.status === 403) {
+            updateSession(sessionId, { userToken: null })
+          }
+          return
+        }
+        const data = await res.json()
+        const statusValue = typeof data?.status === "string" ? data.status : session.payment.status
+        if (statusValue !== session.payment.status) {
+          let message = session.payment.message
+          let statusText = session.status
+          if (statusValue === "refund_pending") {
+            message = "awaiting admin approval"
+            statusText = "refund requested"
+          } else if (statusValue === "refunded") {
+            message = "refund completed"
+            statusText = "refund completed"
+          }
+          updateSession(sessionId, {
+            status: statusText,
+            payment: { ...session.payment, status: statusValue, message },
+          })
+        }
+        if (statusValue === "refunded") {
+          stopPaymentPolling(sessionId)
+        }
+      } catch {
+        // ignore transient errors and retry on next poll
+      }
+    }
+    stopPaymentPolling(sessionId)
+    void poll()
+    paymentTimersRef.current[sessionId] = window.setInterval(poll, 5000)
+  }, [stopPaymentPolling, updateSession])
+
+  useEffect(() => {
+    sessions.forEach((session) => {
+      const timerActive = Boolean(paymentTimersRef.current[session.id])
+      const payment = session.payment
+      if (payment && payment.status === "refund_pending" && payment.paymentId) {
+        if (!timerActive) {
+          startPaymentPolling(session.id, payment.paymentId)
+        }
+      } else if (timerActive && (!payment || payment.status !== "refund_pending")) {
+        stopPaymentPolling(session.id)
+      }
+    })
+  }, [sessions, startPaymentPolling, stopPaymentPolling])
 
   const stopTelemetry = useCallback((sessionId: string) => {
     const timer = timersRef.current[sessionId]
@@ -153,6 +266,7 @@ export default function UserEmulator() {
       qr: defaultQr,
       rideId: null,
       status: "idle",
+      userToken: null,
       idempUnlock: createKey("idem-u"),
       idempLock: createKey("idem-l"),
       telemetryTimer: null,
@@ -189,9 +303,10 @@ export default function UserEmulator() {
   const removeSession = useCallback(
     (sessionId: string) => {
       stopTelemetry(sessionId)
+      stopPaymentPolling(sessionId)
       setSessions((prev) => prev.filter((session) => session.id !== sessionId))
     },
-    [stopTelemetry]
+    [stopTelemetry, stopPaymentPolling, setSessions]
   )
 
   const handleSelect = useCallback(
@@ -315,7 +430,13 @@ export default function UserEmulator() {
   const markPaid = useCallback(
     async (sessionId: string) => {
       const session = sessionsRef.current.find((s) => s.id === sessionId)
-      if (!session || !session.payment || session.payment.status === "captured") return
+      if (
+        !session ||
+        !session.payment ||
+        ["captured", "refund_pending", "refunded"].includes(session.payment.status)
+      ) {
+        return
+      }
       const paymentInfo = session.payment
       updateSession(sessionId, {
         status: "authorizing payment...",
@@ -366,10 +487,70 @@ export default function UserEmulator() {
     [updateSession]
   )
 
+  const requestRefund = useCallback(
+    async (sessionId: string) => {
+      const session = sessionsRef.current.find((s) => s.id === sessionId)
+      if (!session || !session.payment || session.payment.status !== "captured" || !session.payment.paymentId) {
+        return
+      }
+      const paymentInfo = session.payment
+      updateSession(sessionId, {
+        status: "requesting refund...",
+        payment: { ...paymentInfo, message: "submitting refund request" },
+      })
+      try {
+        let token = session.userToken
+        if (!token) {
+          token = await loginSimUser(session.simEmail)
+          if (token) {
+            updateSession(sessionId, { userToken: token })
+          }
+        }
+        if (!token) {
+          updateSession(sessionId, {
+            status: "refund request failed (login)",
+            payment: { ...paymentInfo, message: "could not authenticate for refund" },
+          })
+          return
+        }
+        const res = await fetch(`http://localhost:8000/api/v1/payments/${paymentInfo.paymentId}/refund-request`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": createKey("idem-refund-req"),
+          },
+          body: JSON.stringify({ reason: "Requested from emulator" }),
+        })
+        if (!res.ok) {
+          updateSession(sessionId, {
+            status: `refund request failed (${res.status})`,
+            payment: { ...paymentInfo, message: `refund request ${res.status}` },
+          })
+          return
+        }
+        updateSession(sessionId, {
+          status: "refund requested",
+          payment: { ...paymentInfo, status: "refund_pending", message: "awaiting admin approval" },
+        })
+        startPaymentPolling(sessionId, paymentInfo.paymentId)
+      } catch {
+        updateSession(sessionId, {
+          status: "refund request failed (network error)",
+          payment: { ...paymentInfo, message: "refund request network error" },
+        })
+      }
+    },
+    [startPaymentPolling, updateSession]
+  )
+
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3>User Emulators</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <h3>User Emulator</h3>
+          <MultiplierBadge />
+        </div>
         <button className="btn" onClick={addSession}>
           Add Emulator
         </button>
@@ -439,10 +620,21 @@ export default function UserEmulator() {
                 <button
                   className="btn"
                   onClick={() => markPaid(session.id)}
-                  disabled={session.payment.status === 'captured'}
+                  disabled={['captured', 'refund_pending', 'refunded'].includes(session.payment.status)}
                 >
                   Mark Paid
                 </button>
+                {session.payment.status === 'captured' && (
+                  <button className="btn secondary" onClick={() => requestRefund(session.id)}>
+                    Request Refund
+                  </button>
+                )}
+                {session.payment.status === 'refund_pending' && (
+                  <span style={{ color: '#f59e0b', fontSize: 13 }}>Refund requested</span>
+                )}
+                {session.payment.status === 'refunded' && (
+                  <span style={{ color: '#10b981', fontSize: 13 }}>Refunded</span>
+                )}
               </div>
             )}
           </div>

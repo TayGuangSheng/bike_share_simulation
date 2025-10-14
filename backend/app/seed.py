@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from random import randint, random, choice
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -12,6 +14,7 @@ from .models import (
     Bike,
     BikeLockState,
     BikeStatus,
+    DynamicPricingConfig,
     GeoZone,
     GeoZoneKind,
     GraphEdge,
@@ -22,6 +25,15 @@ from .models import (
     User,
 )
 from .security import hash_password
+
+
+def _ensure_schema() -> None:
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE payments ADD COLUMN refund_reason VARCHAR(255)"))
+        except OperationalError:
+            pass
+
 
 
 def _seed_users(db: Session) -> None:
@@ -213,6 +225,7 @@ def _seed_maintenance(db: Session) -> None:
 
 def seed() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_schema()
     db = SessionLocal()
     try:
         _seed_users(db)
@@ -221,6 +234,17 @@ def seed() -> None:
         _seed_geozones(db)
         _seed_graph_edges(db)
         _seed_maintenance(db)
+        if not db.query(DynamicPricingConfig).count():
+            db.add(
+                DynamicPricingConfig(
+                    weather="clear",
+                    base_multiplier=1.0,
+                    demand_slope=0.02,
+                    demand_threshold=10,
+                    min_multiplier=0.7,
+                    max_multiplier=2.0,
+                )
+            )
         db.commit()
     finally:
         db.close()

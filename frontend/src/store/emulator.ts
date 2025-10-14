@@ -1,10 +1,10 @@
-﻿import { create } from "zustand"
+import { create } from "zustand"
 
 export type EmulatorPayment = {
   rideId: number
   fareCents: number
   paymentId?: number
-  status: "pending" | "authorized" | "captured" | "failed"
+  status: "pending" | "authorized" | "captured" | "refund_pending" | "refunded" | "failed"
   message?: string
 }
 
@@ -25,6 +25,7 @@ export type EmulatorSession = {
     lon: number
   }
   payment?: EmulatorPayment
+  userToken?: string | null
 }
 
 type EmulatorStore = {

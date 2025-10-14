@@ -92,6 +92,77 @@ def test_unlock_lock_and_payments_flow(client: TestClient) -> None:
     assert refund.json()["status"] == "refunded"
 
 
+
+def test_user_can_request_refund(client: TestClient) -> None:
+    user_token = login_token(client, email="user@demo", password="user123")
+    user_headers = auth_header(user_token)
+
+    bike = client.get("/api/v1/bikes", headers=user_headers).json()[0]
+    unlock_headers = {**user_headers, "Idempotency-Key": "user-refund-unlock"}
+    unlock = client.post("/api/v1/unlock", headers=unlock_headers, json={"qr_public_id": bike["qr_public_id"]})
+    assert unlock.status_code == 200, unlock.text
+    ride_id = unlock.json()["ride"]["id"]
+
+    tele_point = {"lat": bike["lat"] + 0.0003, "lon": bike["lon"] + 0.0003, "speed_mps": 3.2, "ts": 200.0}
+    tele = client.post(f"/api/v1/rides/{ride_id}/telemetry", headers=user_headers, json=tele_point)
+    assert tele.status_code == 200
+
+    lock_headers = {**user_headers, "Idempotency-Key": "user-refund-lock"}
+    lock = client.post(
+        "/api/v1/lock",
+        headers=lock_headers,
+        json={"ride_id": ride_id, "lat": bike["lat"] + 0.0003, "lon": bike["lon"] + 0.0003},
+    )
+    assert lock.status_code == 200
+    fare = lock.json()["ride"]["metrics"]["fare_cents"]
+
+    admin_token = login_token(client)
+    admin_headers = auth_header(admin_token)
+
+    auth_headers = {**admin_headers, "Idempotency-Key": "user-refund-auth"}
+    auth_resp = client.post(
+        "/api/v1/payments/authorize",
+        headers=auth_headers,
+        json={"ride_id": ride_id, "amount_cents": fare},
+    )
+    assert auth_resp.status_code == 200, auth_resp.text
+    payment_id = auth_resp.json()["id"]
+
+    cap_headers = {**admin_headers, "Idempotency-Key": "user-refund-cap"}
+    capture = client.post(
+        "/api/v1/payments/capture",
+        headers=cap_headers,
+        json={"payment_id": payment_id},
+    )
+    assert capture.status_code == 200
+    assert capture.json()["status"] == "captured"
+
+    request_headers = {**user_headers, "Idempotency-Key": "user-refund-request"}
+    request = client.post(
+        f"/api/v1/payments/{payment_id}/refund-request",
+        headers=request_headers,
+        json={"reason": "Ride issue"},
+    )
+    assert request.status_code == 200, request.text
+    assert request.json()["status"] == "refund_pending"
+
+    request_again = client.post(
+        f"/api/v1/payments/{payment_id}/refund-request",
+        headers=request_headers,
+        json={"reason": "Ride issue"},
+    )
+    assert request_again.status_code == 200
+
+    refund_headers = {**admin_headers, "Idempotency-Key": "user-refund-complete"}
+    final_refund = client.post(
+        "/api/v1/payments/refund",
+        headers=refund_headers,
+        json={"payment_id": payment_id},
+    )
+    assert final_refund.status_code == 200
+    assert final_refund.json()["status"] == "refunded"
+
+
 def test_unlock_idempotency_conflict(client: TestClient) -> None:
     token = login_token(client)
     headers = auth_header(token)

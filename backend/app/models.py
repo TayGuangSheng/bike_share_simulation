@@ -32,6 +32,7 @@ class RideState(enum.Enum):
 class PaymentStatus(enum.Enum):
     authorized = "authorized"
     captured = "captured"
+    refund_pending = "refund_pending"
     refunded = "refunded"
 
 class MaintenanceStatus(enum.Enum):
@@ -84,6 +85,8 @@ class Ride(Base):
     unlock_issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_telemetry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     smoothing_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    dynamic_multiplier_start: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dynamic_multiplier_end: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     user: Mapped["User | None"] = relationship(back_populates="rides")
     bike: Mapped["Bike"] = relationship(back_populates="rides")
@@ -115,6 +118,7 @@ class Payment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    refund_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     ride: Mapped["Ride"] = relationship(back_populates="payment")
 
@@ -170,3 +174,15 @@ class IdempotencyKey(Base):
     request_hash: Mapped[str] = mapped_column(String(128))
     response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class DynamicPricingConfig(Base):
+    __tablename__ = "dynamic_pricing_config"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    weather: Mapped[str] = mapped_column(String(32), default="clear")
+    base_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    demand_slope: Mapped[float] = mapped_column(Float, default=0.02)
+    demand_threshold: Mapped[int] = mapped_column(Integer, default=10)
+    min_multiplier: Mapped[float] = mapped_column(Float, default=0.7)
+    max_multiplier: Mapped[float] = mapped_column(Float, default=2.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

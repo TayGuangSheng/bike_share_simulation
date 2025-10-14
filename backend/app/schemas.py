@@ -66,6 +66,8 @@ class RideOut(BaseModel):
     unlock_token: str
     polyline_geojson: dict
     metrics: RideMetrics
+    dynamic_multiplier_start: Optional[float] = None
+    dynamic_multiplier_end: Optional[float] = None
 
 
 class UnlockResponse(BaseModel):
@@ -142,6 +144,13 @@ class PaymentOut(BaseModel):
     amount_cents: int
     status: str
     idempotency_key: str
+    captured_at: Optional[str] = None
+    refunded_at: Optional[str] = None
+    refund_reason: Optional[str] = None
+
+
+class PaymentRefundRequestBody(BaseModel):
+    reason: Optional[str] = None
 
 
 class KpiResponse(BaseModel):
@@ -186,3 +195,31 @@ class AckRequest(BaseModel):
 class AckResponse(BaseModel):
     ack: bool
     seq: int
+
+
+class DynamicPricingConfigOut(BaseModel):
+    weather: str
+    base_multiplier: float
+    demand_slope: float
+    demand_threshold: int
+    min_multiplier: float
+    max_multiplier: float
+    last_updated_at: Optional[str] = None
+    current_multiplier: float
+
+
+class DynamicPricingUpdate(BaseModel):
+    weather: Optional[str] = None
+    base_multiplier: Optional[float] = None
+    demand_slope: Optional[float] = None
+    demand_threshold: Optional[int] = None
+    min_multiplier: Optional[float] = None
+    max_multiplier: Optional[float] = None
+
+
+class PricingCurrentOut(BaseModel):
+    multiplier: float
+    weather: str
+    active_rides: int
+    demand_factor: float
+    weather_factor: float
