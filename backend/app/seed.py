@@ -81,7 +81,10 @@ def _seed_pricing_plans(db: Session) -> None:
 
 
 def _seed_bikes(db: Session) -> None:
-    if db.query(Bike).count() >= 60:
+    existing_count = db.query(Bike).count()
+    if existing_count >= 60:
+        db.query(Bike).update({Bike.battery_pct: 100})
+        db.commit()
         return
     bikes = []
     anchors = [
@@ -110,7 +113,7 @@ def _seed_bikes(db: Session) -> None:
                 status=BikeStatus.ok,
                 lat=round(offset_lat, 6),
                 lon=round(offset_lon, 6),
-                battery_pct=randint(40, 100),
+                battery_pct=100,
             )
         )
     db.add_all(bikes)

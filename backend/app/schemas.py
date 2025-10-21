@@ -223,3 +223,16 @@ class PricingCurrentOut(BaseModel):
     active_rides: int
     demand_factor: float
     weather_factor: float
+
+
+class PaymentNotification(BaseModel):
+    ride_id: int
+    payment_id: int
+    status: Literal["captured", "refunded", "failed"]
+    amount_cents: int
+
+
+class BatteryLowNotification(BaseModel):
+    bike_id: int
+    battery_pct: int = Field(..., ge=0, le=100)
+    threshold: int = Field(..., ge=0, le=100)

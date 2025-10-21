@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     smoothing_alpha: float = 0.35
     telemetry_min_interval_s: int = Field(default=2, ge=1)
     pricing_rounding: str = "bankers"
+    service_token: SecretStr = SecretStr("dev-service-token")
 
     class Config:
         env_file = ".env"

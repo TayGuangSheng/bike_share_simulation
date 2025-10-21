@@ -15,7 +15,7 @@ export function usePricingMultiplier(pollMs: number = 15000) {
   const [error, setError] = useState<string | null>(null)
 
   async function load() {
-    const res = await apiGet("/api/v1/pricing/current")
+    const res = await apiGet("/api/v1/pricing/current", "pricing")
     if (!res.ok) {
       setError(`Failed to load multiplier (${res.status})`)
       return

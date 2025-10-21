@@ -33,7 +33,6 @@ def list_bikes(
 ) -> list[BikeOut]:
     query = db.query(Bike)
     bikes = query.all()
-    # TODO: implement distance filtering; MVP returns all bikes.
     return [_serialize_bike(b) for b in bikes]
 
 
@@ -78,4 +77,3 @@ def patch_bike(
     db.commit()
     db.refresh(bike)
     return _serialize_bike(bike)
-

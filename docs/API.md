@@ -1,66 +1,85 @@
-# REST API Overview
+# API Reference
 
-Base URL: `/api/v1`. All `POST` endpoints listed below require an `Idempotency-Key` header unless noted otherwise. Authentication uses JWT bearer tokens supplied via `Authorization: Bearer <token>`.
+The simulator exposes four FastAPI services under `/api/v1`. Unless stated otherwise, requests require a JWT bearer token in the `Authorization` header (`Bearer <access_token>`). Mutating endpoints that may be retried accept an `Idempotency-Key` header.
 
-## Auth
+- Main API: http://localhost:8000/api/v1
+- Pricing & Payments Service: http://localhost:8101/api/v1
+- Weather Service: http://localhost:8102/api/v1
+- Battery Service: http://localhost:8103/api/v1
+
+Seed logins issued by the main API:
+
+| Email | Password | Role |
+| --- | --- | --- |
+| `admin@demo` | `admin123` | Admin |
+| `user@demo` | `user123` | Rider |
+
+## Authentication (Main API)
 
 | Method | Path | Description | Notes |
 | --- | --- | --- | --- |
-| `POST` | `/auth/login` | Exchange `{email, password}` for `{access_token, token_type}` | Seed credentials: `admin@demo/admin123`, `user@demo/user123` |
+| `POST` | `/auth/login` | Accepts `{email, password}` and returns `{access_token, token_type}`. | Use credentials above for local development. |
 
-## Bikes & Operations
-
-| Method | Path | Description | Auth |
-| --- | --- | --- | --- |
-| `GET` | `/bikes` | List bikes optionally filtered by `near_lat`, `near_lon`, `radius_m` | User |
-| `GET` | `/bikes/{id}` | Retrieve bike details | User |
-| `PATCH` | `/bikes/{id}` | Admin updates bike latitude, longitude, `status`, or `battery_pct` | Admin |
-
-## Ride Lifecycle
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/unlock` | Unlock by `{qr_public_id}` -> `{unlock_token, ride, bike}` (enforces bike & ride FSM and idempotency) |
-| `POST` | `/rides/{ride_id}/telemetry` | Append telemetry sample `{lat, lon, speed_mps, ts}`; updates meters, seconds, calories, polyline |
-| `POST` | `/lock` | Attempt to lock with `{ride_id, lat, lon}`; validates geofences (parking buffer +/- 5 m, blocks no-park) |
-
-Responses include ride metrics `{meters, seconds, calories_kcal, fare_cents, pricing_version}` and on lock failure provide `nearest_parking_route`.
-
-## Routes
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/routes` | Compute Dijkstra route between `{from:{lat,lon}, to:{lat,lon}, variant:'shortest'|'safest', graph?}` returning `{polyline_geojson, total_distance_m, est_time_s, nodes, start_node, end_node}` |
-
-## Payments
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/payments/authorize` | Authorize `{ride_id, amount_cents}` exactly matching ride fare |
-| `POST` | `/payments/capture` | Capture authorized payment `{payment_id}` and transition ride to `billed` |
-| `POST` | `/payments/refund` | Refund captured payment `{payment_id}` and transition ride to `refunded` |
-
-All payment mutations are idempotent via the `Idempotency-Key`.
-
-## Analytics & Reliability
+## Bikes & Ride Lifecycle (Main API)
 
 | Method | Path | Description | Auth |
 | --- | --- | --- | --- |
-| `GET` | `/analytics/kpis` | Fleet KPIs: rides/hour, average fare/length, unlock failures, stockouts, violations | Admin |
-| `GET` | `/analytics/queue` | Queueing metrics for lambda, mu, m -> `{rho, wq, w, lq, l}` | Admin |
-| `POST` | `/lab/config` | Configure lossy transport probabilities `{drop_prob, dup_prob, corrupt_prob}` | Admin |
-| `POST` | `/lab/unreliable` | Submit `{seq, checksum?, data}` through unreliable channel -> delivery timeline events | User |
-| `POST` | `/lab/ack` | Send stop-and-wait ack `{seq}` | User |
-| `GET` | `/lab/history` | Retrieve recent unreliability events | Admin |
+| `GET` | `/bikes` | List bikes; optional filters `near_lat`, `near_lon`, `radius_m`. | User |
+| `GET` | `/bikes/{bike_id}` | Retrieve a single bike. | User |
+| `PATCH` | `/bikes/{bike_id}` | Update `lat`, `lon`, `status`, or `battery_pct`. | Admin |
+| `POST` | `/unlock` | Unlock by `{qr_public_id}`. Response includes `ride` and `bike`. Idempotent. | User |
+| `POST` | `/rides/{ride_id}/telemetry` | Append telemetry sample `{lat, lon, speed_mps, ts}`. | User |
+| `POST` | `/lock` | Finalise ride `{ride_id, lat, lon}`. Validates parking geofences. | User |
 
-## Error Formats
+Successful locks return latest ride metrics (`meters`, `seconds`, `calories_kcal`, `fare_cents`, `pricing_version`). On failure the API responds with HTTP 409 and supplies the nearest legal parking location.
 
-Errors follow FastAPI's default JSON structure:
+## Routing & Analytics (Main API)
+
+| Method | Path | Description | Auth |
+| --- | --- | --- | --- |
+| `POST` | `/routes` | Compute Dijkstra route for `{from, to, variant}`. | User |
+| `GET` | `/analytics/kpis` | Fleet KPIs (rides per hour, unlock failures, etc.). | Admin |
+| `GET` | `/analytics/queue` | Queueing metrics for `{lambda, mu, m}`. | Admin |
+| `POST` | `/lab/config` | Configure lossy transport demo `{drop_prob, dup_prob, corrupt_prob}`. | Admin |
+| `POST` | `/lab/unreliable` | Submit unreliable message `{seq, checksum?, data}`. | User |
+| `POST` | `/lab/ack` | Send stop-and-wait ACK `{seq}`. | User |
+| `GET` | `/lab/history` | Inspect recent unreliable channel events. | Admin |
+
+## Pricing & Payments Service
+
+| Method | Path | Description | Headers |
+| --- | --- | --- | --- |
+| `GET` | `/price/quote?bike_id=&lat=&lon=` | Return surge multiplier, base fare, and weather context for a candidate bike. | `Authorization`, `Idempotency-Key` optional |
+| `GET` | `/price/ride/{ride_id}/current?meters=&seconds=` | Live fare estimate for an active ride. | `Authorization` |
+| `POST` | `/payments/charge` | Charge a ride. Body `{ride_id, amount_cents?, meters?, seconds?}`. Amount defaults to main API fare. | `Authorization`, `Idempotency-Key` |
+| `POST` | `/payments/refund` | Refund a captured payment `{payment_id}`. | `Authorization`, `Idempotency-Key` |
+| `GET` | `/payments/records` | Paginated payment history. Filters: `ride_id`, `status`. | `Authorization` |
+
+On successful charge or refund the service posts to the main API hook `/internal/payment/notify` using the shared service token.
+
+## Weather Service
+
+| Method | Path | Description | Headers |
+| --- | --- | --- | --- |
+| `GET` | `/weather/current?lat=&lon=` | Return `{condition, temperature_c, precip_mm, wind_kph, humidity_pct, as_of}`. | `X-Service-Token` for service-to-service calls; user requests may reuse JWT. |
+
+## Battery Service
+
+| Method | Path | Description | Headers |
+| --- | --- | --- | --- |
+| `POST` | `/battery/bikes/{bike_id}/telemetry` | Body `{ride_id, lat, lon, speed_mps, ts}`. Response `{battery_pct}`. | `Authorization` |
+| `GET` | `/battery/bikes/{bike_id}` | Current battery state and alert flags. | `Authorization` |
+
+Low-charge alerts trigger a POST to `/internal/battery/low-battery` on the main API with the shared service token (`SERVICE_TOKEN`).
+
+## Error Responses
+
+Errors follow FastAPI's default payload:
 
 ```json
 {
-  "detail": "message" | { "error": "message", ... }
+  "detail": "message"
 }
 ```
 
-Concurrency violations, FSM errors, and idempotency conflicts use `409 Conflict` with descriptive messages and remediation hints (e.g., nearest parking route).
+Validation issues respond with `detail` as an array of field errors. Idempotency conflicts and ride state violations use HTTP 409 with a descriptive message.

@@ -42,39 +42,37 @@ export default function LiveMap(){
         return data[0]?.qr_public_id ?? ""
       })
 
-      const nextMarkers: Record<string, L.Marker> = { ...markersRef.current }
       const seen = new Set<string>()
 
       data.forEach((b: any) => {
         seen.add(b.qr_public_id)
         const isInUse = b.lock_state !== "locked"
         const color = isInUse ? "#ef4444" : "#2563eb"
+        const existing = markersRef.current[b.qr_public_id]
 
-        const existing = nextMarkers[b.qr_public_id]
         if (existing) {
-          existing.remove()
-          delete nextMarkers[b.qr_public_id]
+          existing.setLatLng([b.lat, b.lon])
+          existing.setStyle({ color, fillColor: color })
+          existing.setPopupContent(formatPopup(b))
+        } else {
+          const mk = L.circleMarker([b.lat, b.lon], {
+            radius: 8,
+            color,
+            fillColor: color,
+            fillOpacity: 1,
+            weight: 2,
+          }).bindPopup(formatPopup(b))
+          mk.addTo(mapRef.current!)
+          markersRef.current[b.qr_public_id] = mk
         }
-
-        const mk = L.circleMarker([b.lat, b.lon], {
-          radius: 8,
-          color,
-          fillColor: color,
-          fillOpacity: 1,
-          weight: 2,
-        }).bindPopup(formatPopup(b))
-        mk.addTo(mapRef.current!)
-        nextMarkers[b.qr_public_id] = mk
       })
 
-      Object.entries(nextMarkers).forEach(([qr, marker]) => {
+      Object.keys(markersRef.current).forEach((qr) => {
         if (!seen.has(qr)) {
-          marker.remove()
-          delete nextMarkers[qr]
+          markersRef.current[qr].remove()
+          delete markersRef.current[qr]
         }
       })
-
-      markersRef.current = nextMarkers
     }
     load()
     const interval = setInterval(load, 2000)

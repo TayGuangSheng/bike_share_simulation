@@ -1,6 +1,8 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
-body, html, #root { margin: 0; height: 100%; }
+body, html, #root { margin: 0; height: 100%; font-family: "Inter", "Segoe UI", Roboto, sans-serif; }
 .layout { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
 .sidebar { background:#0f172a; color:#e2e8f0; padding: 16px; }
 .sidebar h2 { margin-top: 0; }
@@ -20,3 +22,11 @@ body, html, #root { margin: 0; height: 100%; }
 .btn:disabled { opacity:.6; cursor:not-allowed; }
 .input { background:#0b1220; color:#e5e7eb; border:1px solid #1f2937; border-radius:8px; padding:8px 10px; width:100%; }
 .row { display:flex; gap:12px; align-items:center; }
+.section { margin-top:20px; }
+.info-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); }
+.info-tile { background:#0e1628; border:1px solid #1f2937; border-radius:10px; padding:12px; }
+.info-tile strong { display:block; margin-bottom:4px; }
+.step-list { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
+.step-card { background:#0e1628; border:1px solid #1f2937; border-radius:10px; padding:12px; flex:1 1 220px; display:flex; gap:12px; align-items:flex-start; }
+.step-index { background:#2563eb33; color:#93c5fd; border:1px solid #2563eb55; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-weight:600; }
+.muted { color:#94a3b8; font-size:13px; }

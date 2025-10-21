@@ -90,10 +90,10 @@ export default function Revenue() {
     setLoading(true)
     setNotice(null)
     const [summaryRes, recordsRes, configRes, currentRes] = await Promise.all([
-      apiGet("/api/v1/payments/summary"),
-      apiGet("/api/v1/payments/records"),
-      apiGet("/api/v1/pricing/config"),
-      apiGet("/api/v1/pricing/current"),
+      apiGet("/api/v1/payments/summary", "pricing"),
+      apiGet("/api/v1/payments/records", "pricing"),
+      apiGet("/api/v1/pricing/config", "pricing"),
+      apiGet("/api/v1/pricing/current", "pricing"),
     ])
 
     if (!summaryRes.ok) {
@@ -150,7 +150,7 @@ export default function Revenue() {
       payload.min_multiplier = config.min_multiplier
       payload.max_multiplier = config.max_multiplier
     }
-    const res = await apiPut("/api/v1/pricing/config", payload)
+    const res = await apiPut("/api/v1/pricing/config", payload, {}, "pricing")
     setSaving(false)
     if (!res.ok) {
       setError(`Failed to update pricing (${res.status})`)
@@ -162,7 +162,7 @@ export default function Revenue() {
   }
 
   async function loadCurrent() {
-    const current = await apiGet("/api/v1/pricing/current")
+    const current = await apiGet("/api/v1/pricing/current", "pricing")
     if (current.ok) {
       setSnapshot(current.data as PricingSnapshot)
     }
@@ -176,6 +176,7 @@ export default function Revenue() {
       "/api/v1/payments/refund",
       { payment_id: paymentId },
       { "Idempotency-Key": `refund-${paymentId}-${Date.now()}` },
+      "pricing"
     )
     if (!res.ok) {
       const message =

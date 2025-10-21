@@ -1,5 +1,4 @@
-import { useEffect } from "react"
-import { Outlet, Link, useLocation, useNavigate } from "react-router-dom"
+import { Outlet, Link, useLocation, useNavigate, Navigate } from "react-router-dom"
 import "./styles.css"
 import { useAuth } from "../store/auth"
 
@@ -9,15 +8,13 @@ export default function App() {
   const token = useAuth((s) => s.token)
   const setToken = useAuth((s) => s.setToken)
 
-  useEffect(() => {
-    if (!token) {
-      navigate("/login", { replace: true })
-    }
-  }, [token, navigate])
-
   const logout = () => {
     setToken(null)
     navigate("/login", { replace: true })
+  }
+
+  if (!token) {
+    return <Navigate to="/login" replace />
   }
 
   return (
@@ -26,7 +23,7 @@ export default function App() {
         <h2>ELEN90061</h2>
         <nav>
           <Link className={loc.pathname === "/" ? "active" : ""} to="/">
-            Dashboard
+            Get Started
           </Link>
           <Link className={loc.pathname.startsWith("/map") ? "active" : ""} to="/map">
             Live Map
