@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     telemetry_min_interval_s: int = Field(default=2, ge=1)
     pricing_rounding: str = "bankers"
     service_token: SecretStr = SecretStr("dev-service-token")
+    pricing_service_url: str = "http://localhost:8101"
+    weather_service_url: str = "http://localhost:8102"
+    battery_service_url: str = "http://localhost:8103"
 
     class Config:
         env_file = ".env"

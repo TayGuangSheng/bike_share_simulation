@@ -56,7 +56,7 @@ Once the UI compiles, open the printed Vite URL (default http://localhost:5173) 
 
 ## Use the Rider Dashboard
 - Open the URL printed by Vite (default http://localhost:5173) in your browser.
-- Authenticate first—the app redirects to the login screen on first load.
+- Authenticate first - the app redirects to the login screen on first load.
 - Select a simulated rider, choose a bike, and use the `Scan & Unlock`, `Ride`, `Lock`, and `Charge` controls to walk through a full trip.
 - Watch the service timeline cards: every UI action streams the exact HTTP requests logged by the backend, pricing, weather, and battery services so you can connect client behaviour to server processing.
 - The Quote panel shows the live fare calculation. The pricing service polls the backend for ride metrics, calls the weather service for surge conditions, and surfaces the computed fare back to the dashboard.
@@ -85,5 +85,11 @@ Services communicate over REST with shared bearer-token auth. The backend emits 
 - `make seed` reseeds SQLite with demo riders, bikes, zones, pricing rules, and routing graphs.
 - `make test` runs the pytest suite with coverage (target >=92%).
 - `make lint` executes Ruff and Black for linting and formatting.
+
+## Chaos Simulation Controls
+- The admin dashboard exposes a **Chaos Controls** panel that calls `POST /api/v1/chaos/profile` to toggle preset fault mixes (`off`, `minor`, `major`) and failure flavours (timeouts, service errors, auth lockouts, stale data).
+- The backend relays the active profile to the pricing, weather, and battery microservices via `/api/v1/dev/chaos`, and every service applies the profile through request middleware that can inject delays, 5xx, 401 responses, or stale-data headers.
+- `GET /api/v1/chaos/status` returns the live profile, failure streak, circuit-breaker timer, and recent chaos events so the UI can visualise resilience drills and so reports can cite exact timestamps.
+- Custom `X-Chaos-*` headers are exposed over CORS to let the frontend surface retry banners and annotate the per-service timeline with simulated failure details.
 
 Further reference material lives in `docs/API.md` (endpoint catalogue) and `docs/REPORT.md` (design notes, transport and queueing experiments).

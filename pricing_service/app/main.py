@@ -13,6 +13,8 @@ from fastapi import FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .chaos import ChaosFlavor, ChaosMiddleware, ChaosMode, get_status as get_chaos_status, set_profile as set_chaos_profile
+
 
 app = FastAPI(title="Pricing and Payment Service", version="0.1.0")
 
@@ -22,6 +24,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Chaos-Effect", "X-Chaos-Delay", "X-Chaos-Stale", "X-Chaos-State"],
+)
+app.add_middleware(
+    ChaosMiddleware,
+    service_name="pricing",
+    exclude_paths=("/api/v1/dev/chaos", "/docs", "/openapi.json"),
 )
 
 
@@ -116,6 +124,19 @@ class PaymentRecordOut(BaseModel):
 class PaymentSummary(BaseModel):
     captured_cents: int
     captured_count: int
+
+
+class ChaosProfileIn(BaseModel):
+    mode: str
+    flavor: str = "mixed"
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ChaosStatusOut(BaseModel):
+    profile: Dict
+    events: list[Dict]
+    failure_streak: int
+    circuit_open_until: float
 
 
 @dataclass
@@ -423,6 +444,31 @@ def payment_by_id(payment_id: int) -> PaymentRecordOut:
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment not found")
     return _payment_to_out(record)
+
+
+def _validate_token(token: str | None) -> None:
+    if not token or token != SERVICE_TOKEN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid service token")
+
+
+@app.post("/api/v1/dev/chaos", response_model=ChaosStatusOut)
+def configure_chaos(
+    payload: ChaosProfileIn,
+    service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> ChaosStatusOut:
+    _validate_token(service_token)
+    set_chaos_profile(ChaosMode(payload.mode), ChaosFlavor(payload.flavor), payload.intensity, updated_by="backend")
+    snapshot = get_chaos_status()
+    return ChaosStatusOut(**snapshot)
+
+
+@app.get("/api/v1/dev/chaos", response_model=ChaosStatusOut)
+def chaos_status(
+    service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> ChaosStatusOut:
+    _validate_token(service_token)
+    snapshot = get_chaos_status()
+    return ChaosStatusOut(**snapshot)
 
 
 @app.on_event("startup")

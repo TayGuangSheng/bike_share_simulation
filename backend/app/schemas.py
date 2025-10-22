@@ -236,3 +236,24 @@ class BatteryLowNotification(BaseModel):
     bike_id: int
     battery_pct: int = Field(..., ge=0, le=100)
     threshold: int = Field(..., ge=0, le=100)
+
+
+class ChaosProfileRequest(BaseModel):
+    mode: Literal["off", "minor", "major"]
+    flavor: Literal["timeout", "auth", "data", "error", "mixed"] = "mixed"
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ChaosStatusEvent(BaseModel):
+    ts: float
+    service: str
+    effect: str
+    path: str
+    detail: str
+
+
+class ChaosStatusResponse(BaseModel):
+    profile: dict
+    events: list[ChaosStatusEvent]
+    failure_streak: int
+    circuit_open_until: float

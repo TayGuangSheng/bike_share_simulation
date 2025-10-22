@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from .routes import auth, bikes, rides, routes, analytics, payments, lab, pricing, internal
+from .routes import auth, bikes, rides, routes, analytics, payments, lab, pricing, internal, chaos
 
 
 def create_api_router() -> APIRouter:
@@ -14,5 +14,5 @@ def create_api_router() -> APIRouter:
     router.include_router(payments.router)
     router.include_router(lab.router)
     router.include_router(internal.router)
+    router.include_router(chaos.router)
     return router
-

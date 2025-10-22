@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react"
-import { apiGet, apiPost } from "../store/api"
+import { apiGet, apiPost, ChaosMetadata } from "../store/api"
 import MultiplierBadge from "../components/MultiplierBadge"
 import {
   useEmulatorStore,
@@ -51,8 +51,45 @@ const PROGRESS_ACTOR_DETAILS: Record<
   weather: { label: "Weather Service", accent: "#60a5fa" },
 }
 
+type ChaosProfile = {
+  mode: string
+  flavor: string
+  intensity: number
+  updated_at?: number
+  updated_by?: string | null
+}
+
+type ChaosEvent = {
+  ts: number
+  service: string
+  effect: string
+  path: string
+  detail: string
+}
+
+type ChaosStatus = {
+  profile: ChaosProfile
+  events: ChaosEvent[]
+  failure_streak: number
+  circuit_open_until: number
+}
+
+const CHAOS_MODES = [
+  { value: "off", label: "Off", description: "Normal operation" },
+  { value: "minor", label: "Minor hiccups", description: "Occasional issues" },
+  { value: "major", label: "Major outage", description: "Frequent severe faults" },
+] as const
+
+const CHAOS_FLAVORS = [
+  { value: "mixed", label: "Mixed", description: "Blend of errors and delays" },
+  { value: "timeout", label: "Timeout-heavy", description: "Long delays leading to timeouts" },
+  { value: "error", label: "Service errors", description: "Simulated 5xx failures" },
+  { value: "auth", label: "Auth lockout", description: "Token rejection scenarios" },
+  { value: "data", label: "Stale data", description: "Responses flagged as stale" },
+] as const
+
 const describeHttp = (methodOrStatus: string, path: string, detail: string) =>
-  `${methodOrStatus.toUpperCase()} ${path} â€“ ${detail}`
+  `${methodOrStatus.toUpperCase()} ${path} - ${detail}`
 
 function equalBikeLists(prev: any[], next: any[]): boolean {
   if (prev.length !== next.length) return false
@@ -97,6 +134,13 @@ export default function UserEmulator() {
   const setSessions = useEmulatorStore((s) => s.setSessions)
   const nextIndex = useEmulatorStore((s) => s.nextIndex)
   const [error, setError] = useState<string | null>(null)
+  const [chaosStatus, setChaosStatus] = useState<ChaosStatus | null>(null)
+  const [chaosMode, setChaosMode] = useState<string>("off")
+  const [chaosFlavor, setChaosFlavor] = useState<string>("mixed")
+  const [chaosIntensity, setChaosIntensity] = useState<number>(0.5)
+  const [chaosBusy, setChaosBusy] = useState(false)
+  const [chaosError, setChaosError] = useState<string | null>(null)
+  const [chaosMessage, setChaosMessage] = useState<string | null>(null)
   const sessionsRef = useRef<Session[]>([])
   const loadedRef = useRef(false)
   const timersRef = useRef<Record<string, number>>({})
@@ -155,6 +199,102 @@ export default function UserEmulator() {
     [setSessions]
   )
 
+  const logChaosMeta = useCallback(
+    (sessionId: string, actor: EmulatorProgressActor, metadata: ChaosMetadata | null) => {
+      if (!metadata) return
+      const { effect, delaySeconds, stale, state } = metadata
+      if (!effect && !state && !stale) return
+      const details: string[] = []
+      if (effect) {
+        details.push(effect === "stale" ? "response flagged stale" : `effect ${effect}`)
+      }
+      if (typeof delaySeconds === "number" && delaySeconds > 0) {
+        details.push(`delay ${delaySeconds.toFixed(1)}s`)
+      }
+      if (stale && effect !== "stale") {
+        details.push("stale flag")
+      }
+      if (state) {
+        details.push(state)
+      }
+      const severity: EmulatorProgressEntry["kind"] =
+        effect === "timeout" || effect === "error" || state === "circuit-open" ? "error" : "info"
+      pushProgress(sessionId, `Chaos: ${details.join(" | ")}`, actor, "system", severity)
+    },
+    [pushProgress]
+  )
+
+  const syncChaosDraft = useCallback((profile?: ChaosProfile | null) => {
+    if (!profile) return
+    setChaosMode(profile.mode ?? "off")
+    setChaosFlavor(profile.flavor ?? "mixed")
+    if (typeof profile.intensity === "number" && !Number.isNaN(profile.intensity)) {
+      setChaosIntensity(Number(profile.intensity.toFixed(2)))
+    }
+  }, [])
+
+  const refreshChaosStatus = useCallback(
+    async (withSpinner: boolean = true) => {
+      if (withSpinner) setChaosBusy(true)
+      setChaosError(null)
+      if (withSpinner) setChaosMessage(null)
+      const res = await apiGet<ChaosStatus>("/api/v1/chaos/status")
+      if (res.ok && res.data) {
+        setChaosStatus(res.data)
+        syncChaosDraft(res.data.profile)
+      } else if (res.status === 401 || res.status === 403) {
+        setChaosStatus(null)
+        setChaosError("Chaos controls need an admin session.")
+      } else if (res.status !== 0) {
+        setChaosError(`Failed to load chaos status (HTTP ${res.status}).`)
+      } else {
+        setChaosError("Failed to reach backend for chaos status.")
+      }
+      if (withSpinner) setChaosBusy(false)
+    },
+    [syncChaosDraft]
+  )
+
+  const applyChaosProfile = useCallback(async () => {
+    setChaosBusy(true)
+    setChaosError(null)
+    setChaosMessage(null)
+    const payload = {
+      mode: chaosMode,
+      flavor: chaosFlavor,
+      intensity: Math.max(0, Math.min(1, Number(chaosIntensity.toFixed(2)))),
+    }
+    const res = await apiPost<ChaosStatus>("/api/v1/chaos/profile", payload)
+    if (res.ok && res.data) {
+      setChaosStatus(res.data)
+      syncChaosDraft(res.data.profile)
+      setChaosMessage(`Chaos profile active: ${payload.mode} / ${payload.flavor}`)
+    } else if (res.status === 401 || res.status === 403) {
+      setChaosError("Only admins can mutate chaos mode.")
+    } else if (res.status !== 0) {
+      const dataMaybeDetail = (res.data ?? {}) as { detail?: unknown }
+      const detail =
+        typeof dataMaybeDetail.detail === "string" ? dataMaybeDetail.detail : `HTTP ${res.status}`
+      setChaosError(`Failed to update chaos mode: ${detail}`)
+    } else {
+      setChaosError("Network error while applying chaos mode.")
+    }
+    setChaosBusy(false)
+  }, [chaosMode, chaosFlavor, chaosIntensity, syncChaosDraft])
+
+  useEffect(() => {
+    refreshChaosStatus()
+  }, [refreshChaosStatus])
+
+  useEffect(() => {
+    const mode = chaosStatus?.profile?.mode ?? "off"
+    if (mode === "off") return
+    const timer = window.setInterval(() => {
+      refreshChaosStatus(false)
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [chaosStatus?.profile?.mode, refreshChaosStatus])
+
   const fetchQuote = useCallback(
     async (sessionId: string, bike?: any) => {
       const session = sessionsRef.current.find((s) => s.id === sessionId)
@@ -190,9 +330,10 @@ export default function UserEmulator() {
         "info"
       )
       try {
-        const res = await apiGet(`/api/v1/price/quote?${params.toString()}`, "pricing")
-        if (res.ok && res.data) {
-          const weather = res.data.weather ?? "unknown"
+        const { ok, data, status, chaos } = await apiGet(`/api/v1/price/quote?${params.toString()}`, "pricing")
+        logChaosMeta(sessionId, "pricing", chaos)
+        if (ok && data) {
+          const weather = data.weather ?? "unknown"
           pushProgress(
             sessionId,
             describeHttp("200 GET", "/api/v1/weather/current", `conditions supplied (${weather})`),
@@ -205,7 +346,7 @@ export default function UserEmulator() {
             describeHttp(
               "200 GET",
               `/api/v1/price/quote?bike_id=${targetBike.id}`,
-              `quote ready: base SGD ${((res.data.base_cents ?? 0) / 100).toFixed(2)}, multiplier x${(res.data.surge_multiplier ?? 1).toFixed(2)}`
+              `quote ready: base SGD ${((data.base_cents ?? 0) / 100).toFixed(2)}, multiplier x${(data.surge_multiplier ?? 1).toFixed(2)}`
             ),
             "pricing",
             "user",
@@ -213,19 +354,19 @@ export default function UserEmulator() {
           )
           updateSession(sessionId, {
             quote: {
-              baseCents: res.data.base_cents ?? 0,
-              perMinCents: res.data.per_min_cents ?? 0,
-              perKmCents: res.data.per_km_cents ?? 0,
-              surgeMultiplier: res.data.surge_multiplier ?? 1,
-              weather: res.data.weather ?? "clear",
-              demandFactor: res.data.demand_factor ?? 1,
+              baseCents: data.base_cents ?? 0,
+              perMinCents: data.per_min_cents ?? 0,
+              perKmCents: data.per_km_cents ?? 0,
+              surgeMultiplier: data.surge_multiplier ?? 1,
+              weather: data.weather ?? "clear",
+              demandFactor: data.demand_factor ?? 1,
             },
           })
         } else {
           updateSession(sessionId, { quote: undefined })
           pushProgress(
             sessionId,
-            describeHttp(`${res.status} GET`, `/api/v1/price/quote?bike_id=${targetBike.id}`, "quote failed"),
+            describeHttp(`${status} GET`, `/api/v1/price/quote?bike_id=${targetBike.id}`, "quote failed"),
             "pricing",
             "user",
             "error"
@@ -242,7 +383,7 @@ export default function UserEmulator() {
         )
       }
     },
-    [bikes, updateSession]
+    [bikes, updateSession, logChaosMeta]
   )
 
   const stopPaymentPolling = useCallback((sessionId: string) => {
@@ -1333,6 +1474,17 @@ export default function UserEmulator() {
     [pushProgress, updateSession]
   )
 
+  const activeChaosProfile = chaosStatus?.profile ?? null
+  const chaosSliderValue = Math.round(chaosIntensity * 100)
+  const chaosModeActive = activeChaosProfile?.mode ?? "off"
+  const isChaosActive = chaosModeActive !== "off"
+  const chaosIntensityPct = Math.round((activeChaosProfile?.intensity ?? 0) * 100)
+  const circuitUntil = chaosStatus?.circuit_open_until ?? 0
+  const isCircuitOpen = circuitUntil > Date.now() / 1000
+  const latestChaosEvents = (chaosStatus?.events ?? []).slice(0, 5)
+  const chaosUpdatedAt = activeChaosProfile?.updated_at ? new Date(activeChaosProfile.updated_at * 1000) : null
+  const chaosUpdatedLabel = chaosUpdatedAt ? chaosUpdatedAt.toLocaleTimeString() : null
+
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1343,6 +1495,132 @@ export default function UserEmulator() {
         <button className="btn" onClick={addSession}>
           Add Emulator
         </button>
+      </div>
+      <div
+        style={{
+          marginTop: 16,
+          border: "1px solid #1f2937",
+          borderRadius: 8,
+          padding: "12px 16px",
+          background: "#0b1120",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Chaos Controls</div>
+            <div style={{ fontSize: 12, color: "#9ca3af" }}>
+              Toggle simulated outages to validate resilience and UX fallback paths.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn secondary" onClick={() => refreshChaosStatus()} disabled={chaosBusy}>
+              Refresh
+            </button>
+            <button className="btn" onClick={applyChaosProfile} disabled={chaosBusy}>
+              {chaosBusy ? "Working..." : "Apply"}
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, minWidth: 160 }}>
+            Mode
+            <select
+              value={chaosMode}
+              onChange={(e) => {
+                setChaosMode(e.target.value)
+                setChaosMessage(null)
+              }}
+              disabled={chaosBusy}
+            >
+              {CHAOS_MODES.map((mode) => (
+                <option key={mode.value} value={mode.value}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "#9ca3af" }}>
+              {CHAOS_MODES.find((mode) => mode.value === chaosMode)?.description ?? "-"}
+            </span>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, minWidth: 160 }}>
+            Flavor
+            <select
+              value={chaosFlavor}
+              onChange={(e) => {
+                setChaosFlavor(e.target.value)
+                setChaosMessage(null)
+              }}
+              disabled={chaosBusy}
+            >
+              {CHAOS_FLAVORS.map((flavor) => (
+                <option key={flavor.value} value={flavor.value}>
+                  {flavor.label}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "#9ca3af" }}>
+              {CHAOS_FLAVORS.find((flavor) => flavor.value === chaosFlavor)?.description ?? "-"}
+            </span>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, flex: "1 1 220px" }}>
+            Intensity ({chaosSliderValue}%)
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={chaosSliderValue}
+              onChange={(event) => {
+                setChaosIntensity(Number(event.target.value) / 100)
+                setChaosMessage(null)
+              }}
+              disabled={chaosBusy}
+            />
+            <span style={{ color: "#9ca3af" }}>Higher values raise fault probability and severity.</span>
+          </label>
+        </div>
+        {chaosError && <div style={{ color: "#f87171", fontSize: 13 }}>{chaosError}</div>}
+        {chaosMessage && !chaosError && <div style={{ color: "#34d399", fontSize: 13 }}>{chaosMessage}</div>}
+        <div style={{ fontSize: 12, color: isChaosActive ? "#fbbf24" : "#9ca3af" }}>
+          {isChaosActive
+            ? `Active: ${chaosModeActive} / ${activeChaosProfile?.flavor ?? "mixed"} at ${chaosIntensityPct}% intensity`
+            : "Chaos mode disabled"}
+          {chaosStatus && ` - failure streak ${chaosStatus.failure_streak}`}
+          {isCircuitOpen && ` - circuit open until ${new Date(circuitUntil * 1000).toLocaleTimeString()}`}
+          {chaosUpdatedLabel &&
+            ` - updated ${chaosUpdatedLabel}${
+              activeChaosProfile?.updated_by ? ` by ${activeChaosProfile.updated_by}` : ""
+            }`}
+        </div>
+        {latestChaosEvents.length > 0 && (
+          <div style={{ fontSize: 12, color: "#9ca3af" }}>
+            <div style={{ marginBottom: 4 }}>Recent chaos events</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {latestChaosEvents.map((event) => {
+                const tone =
+                  event.effect === "error" || event.effect === "timeout" || event.effect === "circuit"
+                    ? "#fbbf24"
+                    : "#9ca3af"
+                const description = `${new Date(event.ts * 1000).toLocaleTimeString()} - ${event.service} ${
+                  event.effect
+                }${event.detail ? ` - ${event.detail}` : ""}`
+                return (
+                  <div key={`${event.ts}-${event.service}-${event.effect}-${event.path}`} style={{ color: tone }}>
+                    {description}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {chaosStatus && chaosStatus.failure_streak > 0 && !isChaosActive && (
+          <div style={{ fontSize: 12, color: "#9ca3af" }}>
+            Residual failure streak persists from previous run; resume monitoring or clear after cooldown.
+          </div>
+        )}
       </div>
       {error && <div style={{ color: "#f87171", marginBottom: 12 }}>{error}</div>}
       {sessions.length === 0 && <div>No emulator sessions yet. Add one to begin.</div>}
@@ -1508,6 +1786,7 @@ export default function UserEmulator() {
     </div>
   )
 }
+
 
 
 

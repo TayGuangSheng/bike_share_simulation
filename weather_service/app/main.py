@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 from typing import Literal
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from .chaos import ChaosFlavor, ChaosMiddleware, ChaosMode, get_status as get_chaos_status, set_profile as set_chaos_profile
 
 
 app = FastAPI(title="Weather Service", version="0.1.0")
@@ -17,7 +20,16 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Chaos-Effect", "X-Chaos-Delay", "X-Chaos-Stale", "X-Chaos-State"],
 )
+app.add_middleware(
+    ChaosMiddleware,
+    service_name="weather",
+    exclude_paths=("/api/v1/dev/chaos", "/docs", "/openapi.json"),
+)
+
+
+SERVICE_TOKEN = os.getenv("SERVICE_TOKEN", "dev-service-token")
 
 
 CONDITIONS: tuple[Literal["clear", "cloudy", "rain", "storm", "wind"], ...] = (
@@ -35,6 +47,19 @@ class WeatherResponse(BaseModel):
     precip_mm: float
     wind_kph: float
     as_of: str
+
+
+class ChaosProfileIn(BaseModel):
+    mode: str
+    flavor: str = "mixed"
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ChaosStatusOut(BaseModel):
+    profile: dict
+    events: list[dict]
+    failure_streak: int
+    circuit_open_until: float
 
 
 def _pick_condition(lat: float, lon: float) -> str:
@@ -82,3 +107,28 @@ def weather_current(
         wind_kph=round(_wind(condition), 1),
         as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     )
+
+
+def _validate_token(token: str | None) -> None:
+    if not token or token != SERVICE_TOKEN:
+        raise HTTPException(status_code=401, detail="invalid service token")
+
+
+@app.post("/api/v1/dev/chaos", response_model=ChaosStatusOut)
+def configure_chaos(
+    payload: ChaosProfileIn,
+    service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> ChaosStatusOut:
+    _validate_token(service_token)
+    set_chaos_profile(ChaosMode(payload.mode), ChaosFlavor(payload.flavor), payload.intensity, updated_by="backend")
+    snapshot = get_chaos_status()
+    return ChaosStatusOut(**snapshot)
+
+
+@app.get("/api/v1/dev/chaos", response_model=ChaosStatusOut)
+def chaos_status(
+    service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> ChaosStatusOut:
+    _validate_token(service_token)
+    snapshot = get_chaos_status()
+    return ChaosStatusOut(**snapshot)
