@@ -28,6 +28,9 @@ export default function App() {
           <Link className={loc.pathname.startsWith("/map") ? "active" : ""} to="/map">
             Live Map
           </Link>
+          <Link className={loc.pathname.startsWith("/routing") ? "active" : ""} to="/routing">
+            Routing
+          </Link>
           <Link className={loc.pathname.startsWith("/bikes") ? "active" : ""} to="/bikes">
             Bikes
           </Link>

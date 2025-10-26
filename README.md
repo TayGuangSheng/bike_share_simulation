@@ -52,7 +52,6 @@ Once the UI compiles, open the printed Vite URL (default http://localhost:5173) 
 | Email | Password | Role |
 | --- | --- | --- |
 | `admin@demo` | `admin123` | Admin |
-| `user@demo` | `user123` | Rider |
 
 ## Use the Rider Dashboard
 - Open the URL printed by Vite (default http://localhost:5173) in your browser.
@@ -80,11 +79,10 @@ Once the UI compiles, open the printed Vite URL (default http://localhost:5173) 
 
 Services communicate over REST with shared bearer-token auth. The backend emits signed callbacks to pricing for ride updates; pricing and battery push telemetry back to the backend; weather is queried on demand.
 
-## Developer Shortcuts
-- `make dev` (inside `backend/`) starts the FastAPI server at http://localhost:8000/docs.
-- `make seed` reseeds SQLite with demo riders, bikes, zones, pricing rules, and routing graphs.
-- `make test` runs the pytest suite with coverage (target >=92%).
-- `make lint` executes Ruff and Black for linting and formatting.
+## Routing Tab (Shortest Path)
+- New Routing page lets you click start and end on the map and compute a route using Dijkstra over the bundled graphs (toy/civic) via `POST /api/v1/routes`.
+- Choose between `shortest` and `safest` variants; the latter applies additional risk penalties from the graph for a safer route.
+- Results render as a polyline with distance and estimated time (using backend default speed).
 
 ## Chaos Simulation Controls
 - The admin dashboard exposes a **Chaos Controls** panel that calls `POST /api/v1/chaos/profile` to toggle preset fault mixes (`off`, `minor`, `major`) and failure flavours (timeouts, service errors, auth lockouts, stale data).

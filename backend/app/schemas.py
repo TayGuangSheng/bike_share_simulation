@@ -238,6 +238,14 @@ class BatteryLowNotification(BaseModel):
     threshold: int = Field(..., ge=0, le=100)
 
 
+class BatteryForceLockRequest(BaseModel):
+    ride_id: int
+    bike_id: int
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    battery_pct: Optional[float] = Field(default=None, ge=0, le=100)
+
+
 class ChaosProfileRequest(BaseModel):
     mode: Literal["off", "minor", "major"]
     flavor: Literal["timeout", "auth", "data", "error", "mixed"] = "mixed"
